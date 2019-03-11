@@ -2,3 +2,6 @@
 *.pyc
 *.swp
 *.lock
+*.conf
+*.dirlock
+wiki*
