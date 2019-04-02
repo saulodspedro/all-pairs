@@ -1,7 +1,8 @@
 import pymongo
 from allpairsconfig import ConfigAllPairs
 
-def db_conn():
+def insert_pairs(pairs):
+    
     #get configuration parameters
     ap_conf = ConfigAllPairs()
 
@@ -12,34 +13,35 @@ def db_conn():
     conn = pymongo.MongoClient(db_address)
 
     db_ap = conn['db_allpairs']
- 
-    #id_tweet should be unique in the database
-    db_ap.allpairs.create_index([('noun_phrase', pymongo.ASCENDING) ,
-                                 ('ctx_pattern', pymongo.ASCENDING)], unique=True)
-
-    return db_ap
-
-def insert_pairs(pairs):
-    #get database connection
-    db_ap = db_conn()
-
-    update = {'$inc': {'counter': 1}}
     
-    requests = []
+    #create index
+    db_ap.allpairs_raw.create_index([('noun_phrase', pymongo.ASCENDING) ,
+                                    ('ctx_pattern', pymongo.ASCENDING)])
+
+    #update statement
+#    update = {'$inc': {'counter': 1}}
+
+    result = db_ap.allpairs_raw.insert_many([
+        {'noun_phrase': pair[0],
+         'ctx_pattern': pair[1],
+         'counter': 1}
+        for pair in pairs])
     
     #build batch operations
-    for pair in pairs:
+#    requests = []
+#    for pair in pairs:
         
         #set update values
-        filter_ = {'noun_phrase': pair[0],
-                   'ctx_pattern': pair[1]}
+#        filter_ = {'noun_phrase': pair[0],
+#                   'ctx_pattern': pair[1],
+#                   'counter': 1}
         
-        requests.append(pymongo.UpdateOne(filter_, update, upsert=True))
+#        requests.append(pymongo.UpdateOne(filter_, update, upsert=True))
         
     #execute batch updates
-    result = db_ap.allpairs.bulk_write(requests, ordered=False)
+#    result = db_ap.allpairs_v2.bulk_write(requests, ordered=False)
     
     #close connection
-    db_ap.close()
+    conn.close()
     
     return result

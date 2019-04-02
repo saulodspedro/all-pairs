@@ -12,36 +12,31 @@ import time
 import os
 from pathlib import Path
 
-def build_pairs(filename):
+def build_pairs(filename, nlp_remote):
     
     start_time = time.time()
-    
-    print('{}: started building pairs for {}'.format(datetime.datetime.now(), filename))
-    
-    #spacy settings
-    nlp = spacy.load('en_core_web_sm', disable=['ner'])
-    nlp.max_length = 1500000
     
     #load data
     with open(filename, 'r') as myfile:
         data=myfile.read().replace('\n', ' ')
     
     #get noun phrases
-    spacy_obj = nlp(data)
-    
-    del nlp
+    spacy_obj = nlp_remote(data)
+ 
+  #  del nlp_remote
     
     nouns = [chunk.text.lower() for chunk in spacy_obj.noun_chunks]
     set_nouns = set([n for n in nouns if n not in pronouns + ignored_words])  #remove pronouns
     
     del nouns
     del spacy_obj
-    
+
     #get candidate contexts
+
     textblob_obj = TextBlob(data)
     everygrams = nltk.everygrams(textblob_obj.words,
                                  min_len=3,
-                                 max_len=5)
+                                 max_len=5)       
     
     del textblob_obj
     
@@ -64,16 +59,15 @@ def build_pairs(filename):
     del set_nouns
     
     #save to database
-    print('{}: saving pairs for {}'.format(datetime.datetime.now(), filename))
     res = insert_pairs(pairs)
     
     end_time = time.time()
     
     #print results
-    print('{}: finished building pairs for {} in {}s'.format(datetime.datetime.now(), filename, end_time - start_time))
-    print('{} created {} instances:'.format(filename, len(pairs)))
-    print('from {}, {} instances were upserted'.format(filename, res.upserted_count))
-    print('from {}, {} instances were modified'.format(filename, res.modified_count))
+    print('{}: {} {} {}s'.format(datetime.datetime.now(),
+                                 filename,
+                                 len(res.inserted_ids),
+                                 end_time - start_time))
 
 def main():
     
@@ -84,15 +78,15 @@ def main():
     data_path = ap_conf.data_path
     
     #files are also keys to dask graph
-    file_list = Path(data_path).rglob('*')
+    file_list = Path(data_path).rglob('*')    
     file_list = [str(f) for f in file_list if f.is_file()]
     
-    #build dask graph
-    dsk_params = []
-    for f in file_list:
-        dsk_params.append((f, (build_pairs, f)))
-        
-    dsk = dict(dsk_params)
+    #use a third of the data
+    file_list = file_list[0::3]
+    
+    #spacy settings
+    nlp = spacy.load('en_core_web_sm', disable=['ner'])
+    nlp.max_length = 1500000
     
     #set dask params
     client_opt = {'n_workers': os.cpu_count()-1,
@@ -101,12 +95,20 @@ def main():
                   'diagnostics_port': 8787}
 
     client = Client(**client_opt)
-
+    
+    nlp_remote = client.scatter(nlp, broadcast=True)
+    
+    #build dask graph
+    dsk_params = []
+    for f in file_list:
+        dsk_params.append((f, (build_pairs, f, nlp_remote)))
+        
+    dsk = dict(dsk_params)
+    
     res = client.get(dsk, file_list)
 
 if __name__ == '__main__':
     start = time.time()
-    print('{}: started main execution'.format(datetime.datetime.now()))
     main()
     end = time.time()
 
