@@ -1,15 +1,15 @@
 import nltk
 import spacy
 from dask.distributed import Client
-from textblob import TextBlob
 
 from utils import insert_pairs
-from metadata import pronouns, ignored_words, ignored_contexts
+from metadata import pronouns, ignored_words, left_noun_pattern, right_noun_pattern
 from allpairsconfig import ConfigAllPairs
 
 import datetime
 import time
 import os
+import re
 from pathlib import Path
 
 def build_pairs(filename, nlp_remote):
@@ -22,8 +22,9 @@ def build_pairs(filename, nlp_remote):
     
     #get noun phrases
     spacy_obj = nlp_remote(data)
- 
-  #  del nlp_remote
+    
+    #remove puctuation
+    tokens = [t for t in spacy_obj.doc if t.pos_ != 'PUNCT']
     
     nouns = [chunk.text.lower() for chunk in spacy_obj.noun_chunks]
     set_nouns = set([n for n in nouns if n not in pronouns + ignored_words])  #remove pronouns
@@ -32,29 +33,43 @@ def build_pairs(filename, nlp_remote):
     del spacy_obj
 
     #get candidate contexts
-
-    textblob_obj = TextBlob(data)
-    everygrams = nltk.everygrams(textblob_obj.words,
+    everygrams = nltk.everygrams(tokens,
                                  min_len=3,
-                                 max_len=5)       
-    
-    del textblob_obj
+                                 max_len=5)
     
     #build pairs
     pairs = []
+    
     for gram in everygrams:
-        explode_gram = nltk.everygrams(gram,
-                                       min_len=1,
-                                       max_len=len(gram)-2)  #avoid context patterns with a single word
+        first_word = gram[0]
+        last_word = gram[-1]
         
-        ctx_candidates = [' '.join(g).lower() for g in explode_gram]
-        intersection = list(set(ctx_candidates).intersection(set_nouns))
+        explode_gram = list(nltk.everygrams(gram, min_len=1))
         
-        joined = ' '.join(gram).lower()
-        
-        for noun in intersection:
-            if joined.startswith(noun+" ") or joined.endswith(" "+noun):
-                pairs.append((noun, joined.replace(noun,'_',1)))
+        for eg in explode_gram:
+            if(len(eg) <= len(gram)-2):  #noun phrase must be small enough, so context is of size 2 or greater
+                
+                eg_string = ' '.join([g.text for g in eg]).lower()  #  possible noun phrase
+                
+                if(eg_string in set_nouns):  #  possible noun phrase actually is a noun phrase
+                    
+                    #the noun phrase is on the left side of context pattern
+                    if(eg[0] == first_word):
+                        context = [gr for gr in explode_gram if len(gr) == len(gram)-len(eg) and gr[-1] == last_word]
+                        ctx_pos_pattern = ''.join([c.pos_ for c in context[0]])
+                            
+                        if(re.search(left_noun_pattern, ctx_pos_pattern)):
+                            ctx_string = ' '.join([c.text for c in context[0]])
+                            pairs.append((eg_string, "_ "+ctx_string))
+                
+                    #the noun phrase is on the right side of context pattern
+                    if(eg[-1] == last_word):
+                        context = [gr for gr in explode_gram if len(gr) == len(gram)-len(eg) and gr[0] == first_word]
+                        ctx_pos_pattern = ''.join([c.pos_ for c in context[0]])
+                        
+                        if(re.search(right_noun_pattern, ctx_pos_pattern)):
+                            ctx_string = ' '.join([c.text for c in context[0]])
+                            pairs.append((eg_string, ctx_string+" _"))
     
     del set_nouns
     
@@ -80,9 +95,6 @@ def main():
     #files are also keys to dask graph
     file_list = Path(data_path).rglob('*')    
     file_list = [str(f) for f in file_list if f.is_file()]
-    
-    #use a third of the data
-    file_list = file_list[0::3]
     
     #spacy settings
     nlp = spacy.load('en_core_web_sm', disable=['ner'])

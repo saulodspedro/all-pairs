@@ -2,9 +2,5 @@ pronouns=['I','you','he','she','it','we','they','me','him','her','us','them','wh
 
 ignored_words = ['part','and','a','the end','end','parts','use','s']
 
-ignored_contexts = ['in the _',
-                    'of the _', 
-                    '_ of the',
-                    'at that _',
-                    'at the _',
-                    'on the _']
+right_noun_pattern = '^(NOUN|PROPN)*(VERB)+(ADJ|ADP|DT)+$|^(((NOUN)+(ADJ)+|(ADJ)+(NOUN)+)(ADJ|NOUN)*(ADJ|ADP|DET)+)$'
+left_noun_pattern = '^VERB\w*NOUN$|^(VERB)+ADP$'
